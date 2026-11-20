@@ -1,0 +1,4 @@
+inventory_management
+*.log
+.env
+.DS_Store
