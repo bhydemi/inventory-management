@@ -1,20 +1,46 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"inventory_management/cache"
 	"inventory_management/database"
 	"inventory_management/models"
 )
 
-// GetItems handles GET /inventory. It supports pagination (limit, offset),
-// filtering (name, min_stock), and sorting (sort_by, order).
+// itemCache holds short-lived copies of GET responses. Any write (create,
+// update, delete) flushes it, so a cached response can never outlive the
+// data it was built from by more than its TTL.
+var itemCache = cache.New(10 * time.Second)
+
+// GetItems godoc
+// @Summary      List inventory items
+// @Description  Returns a paginated, filterable, sortable list of items.
+// @Tags         inventory
+// @Produce      json
+// @Param        limit      query     int     false  "max items to return"      default(10)
+// @Param        offset     query     int     false  "items to skip"            default(0)
+// @Param        sort_by    query     string  false  "name, stock, or price"    default(name)
+// @Param        order      query     string  false  "asc or desc"              default(asc)
+// @Param        name       query     string  false  "substring filter on name"
+// @Param        min_stock  query     int     false  "minimum stock level"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Router       /inventory [get]
 func GetItems(c *gin.Context) {
+	cacheKey := "list:" + c.Request.URL.RawQuery
+	if cached, ok := itemCache.Get(cacheKey); ok {
+		c.Data(http.StatusOK, "application/json; charset=utf-8", cached)
+		return
+	}
+
 	query := database.DB.Model(&models.Item{})
 
 	// --- filtering ---
@@ -70,18 +96,39 @@ func GetItems(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	body := gin.H{
 		"data":   items,
 		"total":  total,
 		"limit":  limit,
 		"offset": offset,
-	})
+	}
+
+	if encoded, err := json.Marshal(body); err == nil {
+		itemCache.Set(cacheKey, encoded)
+	}
+
+	c.JSON(http.StatusOK, body)
 }
 
-// GetItem handles GET /inventory/:id.
+// GetItem godoc
+// @Summary      Get a single inventory item
+// @Description  Returns one item by its UUID.
+// @Tags         inventory
+// @Produce      json
+// @Param        id   path      string  true  "Item ID (UUID)"
+// @Success      200  {object}  models.Item
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /inventory/{id} [get]
 func GetItem(c *gin.Context) {
 	id, ok := parseID(c)
 	if !ok {
+		return
+	}
+
+	cacheKey := "item:" + id
+	if cached, ok := itemCache.Get(cacheKey); ok {
+		c.Data(http.StatusOK, "application/json; charset=utf-8", cached)
 		return
 	}
 
@@ -91,10 +138,25 @@ func GetItem(c *gin.Context) {
 		return
 	}
 
+	if encoded, err := json.Marshal(item); err == nil {
+		itemCache.Set(cacheKey, encoded)
+	}
+
 	c.JSON(http.StatusOK, item)
 }
 
-// CreateItem handles POST /inventory.
+// CreateItem godoc
+// @Summary      Create an inventory item
+// @Description  Adds a new item to the inventory. Requires a bearer token.
+// @Tags         inventory
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        item  body      models.ItemInput  true  "New item"
+// @Success      201   {object}  models.Item
+// @Failure      400   {object}  map[string]string
+// @Failure      401   {object}  map[string]string
+// @Router       /inventory [post]
 func CreateItem(c *gin.Context) {
 	var input models.ItemInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -114,10 +176,24 @@ func CreateItem(c *gin.Context) {
 		return
 	}
 
+	itemCache.Flush()
 	c.JSON(http.StatusCreated, item)
 }
 
-// UpdateItem handles PUT /inventory/:id.
+// UpdateItem godoc
+// @Summary      Update an inventory item
+// @Description  Replaces an existing item's fields. Requires a bearer token.
+// @Tags         inventory
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id    path      string            true  "Item ID (UUID)"
+// @Param        item  body      models.ItemInput  true  "Updated item"
+// @Success      200   {object}  models.Item
+// @Failure      400   {object}  map[string]string
+// @Failure      401   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Router       /inventory/{id} [put]
 func UpdateItem(c *gin.Context) {
 	id, ok := parseID(c)
 	if !ok {
@@ -145,10 +221,22 @@ func UpdateItem(c *gin.Context) {
 		return
 	}
 
+	itemCache.Flush()
 	c.JSON(http.StatusOK, item)
 }
 
-// DeleteItem handles DELETE /inventory/:id.
+// DeleteItem godoc
+// @Summary      Delete an inventory item
+// @Description  Removes an item from the inventory. Requires a bearer token.
+// @Tags         inventory
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path      string  true  "Item ID (UUID)"
+// @Success      200  {object}  map[string]string
+// @Failure      400  {object}  map[string]string
+// @Failure      401  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Router       /inventory/{id} [delete]
 func DeleteItem(c *gin.Context) {
 	id, ok := parseID(c)
 	if !ok {
@@ -166,6 +254,7 @@ func DeleteItem(c *gin.Context) {
 		return
 	}
 
+	itemCache.Flush()
 	c.JSON(http.StatusOK, gin.H{"message": "item deleted", "id": id})
 }
 

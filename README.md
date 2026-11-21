@@ -16,9 +16,14 @@ pagination, filtering, sorting, and per-client rate limiting built in.
 ├── database/
 │   └── database.go              # PostgreSQL connection, migration, and seeding
 ├── handlers/
-│   └── item_handler.go          # one handler function per endpoint
-└── middleware/
-    └── rate_limiter.go          # per-client token-bucket rate limiting
+│   ├── item_handler.go          # one handler function per inventory endpoint
+│   └── auth_handler.go          # POST /login handler
+├── middleware/
+│   ├── rate_limiter.go          # per-client token-bucket rate limiting
+│   └── auth.go                  # JWT issuing + verification middleware
+├── cache/
+│   └── cache.go                 # in-memory TTL cache for GET responses
+└── docs/                        # generated Swagger spec (see "API documentation" below)
 ```
 
 ## Prerequisites
@@ -80,6 +85,59 @@ listening on :8080
 The server listens on `:8080` by default; set `PORT` to use a different
 port.
 
+## API documentation (Swagger)
+
+Interactive, browsable API docs are generated from annotations in the
+handler code and served at:
+
+```
+http://localhost:8080/swagger/index.html
+```
+
+Use the **Authorize** button there to paste a bearer token (see
+Authentication below) and try the protected endpoints directly from the
+browser. The docs are pre-generated and committed under `docs/`; if you
+change a handler's annotations, regenerate them with:
+
+```bash
+go install github.com/swaggo/swag/cmd/swag@latest
+swag init --parseDependency --parseInternal
+```
+
+## Authentication
+
+Reads (`GET`) are open to anyone. Writes (`POST`, `PUT`, `DELETE` on
+`/inventory`) require a JWT, obtained by logging in:
+
+```bash
+curl -X POST "http://localhost:8080/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin123"}'
+# => {"token": "eyJhbGciOi..."}
+```
+
+Then pass it on any write request:
+
+```bash
+curl -X POST "http://localhost:8080/inventory" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"name": "Desk Lamp", "stock": 40, "price": 24.99}'
+```
+
+A missing, malformed, or expired token returns `401`. The demo
+credentials (`admin` / `admin123`) and the JWT signing secret can be
+overridden via the `AUTH_USERNAME`, `AUTH_PASSWORD`, and `JWT_SECRET`
+environment variables.
+
+## Caching
+
+`GET /inventory` and `GET /inventory/:id` responses are cached in memory
+for 10 seconds, keyed by the exact query string (or item ID), to avoid
+re-querying the database for identical, frequently-repeated reads. Any
+write (create, update, delete) immediately flushes the entire cache, so a
+client can never read stale data back after making a change.
+
 ## API reference
 
 All responses are JSON. The base path is `/inventory`.
@@ -131,31 +189,35 @@ curl "http://localhost:8080/inventory/<item-id>"
 Returns `200` with the item, or `404` with `{"error": "item not found"}`
 if the ID doesn't exist or isn't a valid UUID (`400` in the latter case).
 
-### Create an item — `POST /inventory`
+### Create an item — `POST /inventory` (requires auth)
 
 ```bash
 curl -X POST "http://localhost:8080/inventory" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{"name": "Desk Lamp", "stock": 40, "price": 24.99}'
 ```
 
-Returns `201` with the created item (server-assigned UUID included), or
-`400` if `name` is missing or `stock`/`price` is negative.
+Returns `201` with the created item (server-assigned UUID included),
+`400` if `name` is missing or `stock`/`price` is negative, or `401` if
+the bearer token is missing/invalid (see Authentication above).
 
-### Update an item — `PUT /inventory/:id`
+### Update an item — `PUT /inventory/:id` (requires auth)
 
 ```bash
 curl -X PUT "http://localhost:8080/inventory/<item-id>" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
   -d '{"name": "Desk Lamp (LED)", "stock": 35, "price": 29.99}'
 ```
 
 Returns `200` with the updated item, or `404` if the ID doesn't exist.
 
-### Delete an item — `DELETE /inventory/:id`
+### Delete an item — `DELETE /inventory/:id` (requires auth)
 
 ```bash
-curl -X DELETE "http://localhost:8080/inventory/<item-id>"
+curl -X DELETE "http://localhost:8080/inventory/<item-id>" \
+  -H "Authorization: Bearer <token>"
 ```
 
 Returns `200` with a confirmation message, or `404` if the ID doesn't

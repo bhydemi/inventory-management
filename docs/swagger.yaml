@@ -1,0 +1,288 @@
+basePath: /
+definitions:
+  handlers.LoginInput:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  models.Item:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      price:
+        type: number
+      stock:
+        type: integer
+    type: object
+  models.ItemInput:
+    properties:
+      name:
+        type: string
+      price:
+        minimum: 0
+        type: number
+      stock:
+        minimum: 0
+        type: integer
+    required:
+    - name
+    type: object
+info:
+  contact: {}
+  description: A RESTful inventory management service with pagination, filtering,
+    sorting, rate limiting, caching, and JWT-protected writes.
+  title: Inventory Management API
+  version: "1.0"
+paths:
+  /inventory:
+    get:
+      description: Returns a paginated, filterable, sortable list of items.
+      parameters:
+      - default: 10
+        description: max items to return
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: items to skip
+        in: query
+        name: offset
+        type: integer
+      - default: name
+        description: name, stock, or price
+        in: query
+        name: sort_by
+        type: string
+      - default: asc
+        description: asc or desc
+        in: query
+        name: order
+        type: string
+      - description: substring filter on name
+        in: query
+        name: name
+        type: string
+      - description: minimum stock level
+        in: query
+        name: min_stock
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List inventory items
+      tags:
+      - inventory
+    post:
+      consumes:
+      - application/json
+      description: Adds a new item to the inventory. Requires a bearer token.
+      parameters:
+      - description: New item
+        in: body
+        name: item
+        required: true
+        schema:
+          $ref: '#/definitions/models.ItemInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.Item'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create an inventory item
+      tags:
+      - inventory
+  /inventory/{id}:
+    delete:
+      description: Removes an item from the inventory. Requires a bearer token.
+      parameters:
+      - description: Item ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete an inventory item
+      tags:
+      - inventory
+    get:
+      description: Returns one item by its UUID.
+      parameters:
+      - description: Item ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Item'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a single inventory item
+      tags:
+      - inventory
+    put:
+      consumes:
+      - application/json
+      description: Replaces an existing item's fields. Requires a bearer token.
+      parameters:
+      - description: Item ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated item
+        in: body
+        name: item
+        required: true
+        schema:
+          $ref: '#/definitions/models.ItemInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Item'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update an inventory item
+      tags:
+      - inventory
+  /login:
+    post:
+      consumes:
+      - application/json
+      description: Exchanges a username/password for a bearer token required by the
+        write endpoints (POST, PUT, DELETE on /inventory).
+      parameters:
+      - description: Login credentials
+        in: body
+        name: credentials
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.LoginInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Log in and receive a JWT
+      tags:
+      - auth
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and the JWT returned from /login.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
