@@ -26,9 +26,17 @@ import (
 )
 
 func main() {
+	// Gin's debug-mode console output (route dump, startup warnings) is
+	// meant for local iteration, not a finished server -- default to a
+	// quiet, production-style console unless GIN_MODE is set explicitly.
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	database.Connect()
 
 	router := gin.Default()
+	router.SetTrustedProxies(nil)
 
 	// Swagger's own page loads several static assets (JS, CSS, favicons)
 	// in one burst -- rate limiting is for the API, not its docs, so it's
